@@ -1,0 +1,1027 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>患者信息交互式采集表 (Supabase版)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Chosen Palette: Warm Neutrals (Beige/Gray) -->
+    <!-- Application Structure Plan: 采用侧边栏导航和主内容区的单页应用 (SPA) 结构。这种结构对于分节清晰的表单（如本例中的患者信息采集表）非常直观。用户可以通过点击侧边栏在'欢迎/仪表盘'、'人口学资料'和'病史'的各个子部分（现病史、合并症等）之间即时切换。'欢迎/仪表盘'部分将包含一个模拟图表，展示此表单收集数据后可能的分析维度，以满足'数据可视化'的要求。表单部分将被转换为交互式HTML表单，使用户可以'探索'和'消费'（理解）需要收集的信息结构。这种设计优先考虑导航的便捷性和对表单结构的清晰理解。 -->
+    <!-- Visualization & Content Choices: 主要内容是表单结构，而非已有数据。因此，'可视化'将通过一个模拟图表（Chart.js条形图）在'欢迎'页面展示，模拟'患者年龄分布'，以展示数据收集后的潜力。表单的'探索'将通过将其从Markdown表格转换为交互式HTML表单来实现。例如：'地区'将使用单选按钮 (radio)，'慢性并发症'将使用复选框 (checkbox)，'IIEF-5评分'将使用数字输入 (input type='number')。所有交互均通过Vanilla JS处理（主要是导航切换内容板块）。此方法在没有预先存在数据的情况下，满足了'交互式'和'可视化'的要求。确认：未使用SVG或Mermaid JS。 -->
+    <!-- CONFIRMATION: NO SVG graphics used. NO Mermaid JS used. -->
+    <style>
+        body {
+            font-family: 'Inter', 'Noto Sans SC', sans-serif;
+            background-color: #f8f9fa;
+        }
+        .chart-container {
+            position: relative;
+            width: 100%;
+            max-width: 600px;
+            margin-left: auto;
+            margin-right: auto;
+            height: 300px;
+            max-height: 400px;
+        }
+        @media (min-width: 768px) {
+            .chart-container {
+                height: 350px;
+            }
+        }
+        .nav-link {
+            display: block;
+            padding: 0.75rem 1.5rem;
+            border-radius: 0.5rem;
+            color: #374151;
+            font-weight: 500;
+            transition: all 0.2s ease-in-out;
+        }
+        .nav-link:hover {
+            background-color: #e5e7eb;
+        }
+        .nav-link.active {
+            background-color: #2563eb;
+            color: #ffffff;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+        }
+        .nav-link-sub {
+            padding-left: 2.5rem;
+            font-size: 0.875rem;
+            color: #4b5563;
+        }
+        .form-section {
+            background-color: #ffffff;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+            margin-bottom: 1.5rem;
+            overflow: hidden;
+        }
+        .form-header {
+            background-color: #f9fafb;
+            padding: 1rem 1.5rem;
+            border-bottom: 1px solid #e5e7eb;
+        }
+        .form-header h3 {
+            font-size: 1.125rem;
+            font-weight: 600;
+            color: #111827;
+        }
+        .form-body {
+            padding: 1.5rem;
+            display: grid;
+            gap: 1.5rem;
+        }
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+        .form-group-grid {
+            display: grid;
+            grid-template-columns: repeat(1, minmax(0, 1fr));
+            gap: 1rem;
+        }
+        @media (min-width: 640px) {
+            .form-group-grid {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+        }
+        .form-label {
+            font-size: 0.875rem;
+            font-weight: 500;
+            color: #374151;
+        }
+        .form-input {
+            width: 100%;
+            padding: 0.625rem 0.875rem;
+            border: 1px solid #d1d5db;
+            border-radius: 0.5rem;
+            box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+            transition: border-color 0.2s, box-shadow 0.2s;
+        }
+        .form-input:focus {
+            outline: none;
+            border-color: #2563eb;
+            box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.2);
+        }
+        .radio-group, .checkbox-group {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.75rem 1.25rem;
+            padding-top: 0.25rem;
+        }
+        .radio-label, .checkbox-label {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.875rem;
+            color: #4b5563;
+        }
+        .form-radio, .form-checkbox {
+            width: 1rem;
+            height: 1rem;
+            border-color: #d1d5db;
+        }
+        .form-radio {
+            border-radius: 9999px;
+        }
+        .form-checkbox {
+            border-radius: 0.25rem;
+        }
+        .form-radio:checked {
+            background-color: #2563eb;
+            border-color: #2563eb;
+        }
+        .form-checkbox:checked {
+            background-color: #2563eb;
+            border-color: #2563eb;
+        }
+        .page-content {
+            animation: fadeIn 0.5s ease-in-out;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .status-message {
+            position: fixed;
+            bottom: -100px;
+            right: 1.5rem;
+            z-index: 100;
+            padding: 0.75rem 1.25rem;
+            border-radius: 0.5rem;
+            font-weight: 500;
+            color: #ffffff;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            transition: bottom 0.5s ease-in-out;
+        }
+        .status-message.show {
+            bottom: 5.5rem; /* A_bottom_of_save_buttons */
+        }
+        .status-message.bg-success {
+            background-color: #10b981; /* green-500 */
+        }
+        .status-message.bg-error {
+            background-color: #ef4444; /* red-500 */
+        }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-800">
+
+    <div class="flex h-screen overflow-hidden">
+        
+        <nav class="w-64 bg-white shadow-lg overflow-y-auto p-4 hidden md:block flex-shrink-0">
+            <div class="py-4 px-2 mb-4">
+                <h2 class="text-xl font-bold text-blue-600">患者信息采集</h2>
+            </div>
+            <ul class="space-y-1">
+                <li><a href="#" class="nav-link active" data-page="page-welcome">欢迎 / 仪表盘</a></li>
+                <li><a href="#" class="nav-link" data-page="page-demographics">一、 人口学资料</a></li>
+                <li>
+                    <span class="nav-link" style="cursor: default;">二、 病史</span>
+                    <ul class="mt-1 space-y-1">
+                        <li><a href="#" class="nav-link nav-link-sub" data-page="page-present-illness">1. 现病史</a></li>
+                        <li><a href="#" class="nav-link nav-link-sub" data-page="page-comorbidities">2. 合并症</a></li>
+                        <li><a href="#" class="nav-link nav-link-sub" data-page="page-other-history">3. 其他既往病史</a></li>
+                    </ul>
+                </li>
+            </ul>
+        </nav>
+
+        <main class="flex-1 overflow-y-auto p-6 md:p-10">
+            
+            <div id="page-welcome" class="page-content">
+                <h1 class="text-3xl font-bold text-gray-900 mb-4">欢迎使用患者信息采集系统</h1>
+                <p class="text-lg text-gray-600 mb-8">
+                    本系统旨在将纸质版的患者信息采集表转换为一个交互式的网页应用。您可以轻松地在各个部分之间导航，并以结构化的方式查看和理解所需收集的信息。这不仅提高了数据采集的效率，也为后续的数据分析奠定了基础。
+                </p>
+                <div class="bg-white p-6 rounded-lg shadow-lg">
+                    <h2 class="text-xl font-semibold text-gray-800 mb-4">模拟数据分析：患者年龄分布</h2>
+                    <p class="text-gray-600 mb-6">
+                        当收集到足够的数据后，我们可以进行各种维度的分析。下图是一个模拟示例，展示了已登记患者的年龄分布情况。通过这种可视化，医生可以快速了解患者群体的构成。
+                    </p>
+                    <div class="chart-container">
+                        <canvas id="mockChartCanvas"></canvas>
+                    </div>
+                    <div class="mt-8 pt-6 border-t border-gray-200">
+                        <h2 class="text-xl font-semibold text-gray-800 mb-4">数据导出</h2>
+                        <p class="text-gray-600 mb-4">点击下方按钮可下载所有已保存患者的数据，格式为 Excel 兼容的 CSV 文件。</p>
+                        <button id="exportButton" class="px-5 py-2.5 bg-green-600 text-white font-medium rounded-lg shadow-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-opacity-50 transition duration-200">
+                            导出为 Excel (CSV)
+                        </button>
+                        <span id="exportStatus" class="ml-4 text-gray-600 text-sm"></span>
+                    </div>
+                </div>
+            </div>
+
+            <div id="page-demographics" class="page-content hidden">
+                <h1 class="text-3xl font-bold text-gray-900 mb-6">一、 人口学资料 (Demographic Data)</h1>
+                <form class="form-section">
+                    <div class="form-body form-group-grid">
+                        <div class="form-group">
+                            <label class="form-label" for="patient-id">患者ID/编号</label>
+                            <input class="form-input" type="text" id="patient-id" placeholder="请输入ID或编号">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label" for="age">年龄</label>
+                            <input class="form-input" type="number" id="age" placeholder="请输入年龄">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label" for="ethnicity">民族</label>
+                            <input class="form-input" type="text" id="ethnicity" placeholder="例如：汉族">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">地区</label>
+                            <div class="radio-group">
+                                <label class="radio-label"><input type="radio" name="region" class="form-radio"> 城市</label>
+                                <label class="radio-label"><input type="radio" name="region" class="form-radio"> 农村</label>
+                            </div>
+                        </div>
+                        <div class="form-group sm:col-span-2">
+                            <label class="form-label" for="address">常住地址</label>
+                            <input class="form-input" type="text" id="address" placeholder="请输入详细地址">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">婚姻/伴侣状况</label>
+                            <div class="radio-group">
+                                <label class="radio-label"><input type="radio" name="marital" class="form-radio"> 未婚</label>
+                                <label class="radio-label"><input type="radio" name="marital" class="form-radio"> 已婚</label>
+                                <label class="radio-label"><input type="radio" name="marital" class="form-radio"> 离异</label>
+                                <label class="radio-label"><input type="radio" name="marital" class="form-radio"> 丧偶</label>
+                                <label class="radio-label"><input type="radio" name="marital" class="form-radio"> 有固定伴侣</label>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">教育水平</label>
+                            <div class="radio-group" style="flex-direction: column; gap: 0.75rem;">
+                                <label class="radio-label"><input type="radio" name="education" class="form-radio"> 小学及以下</label>
+                                <label class="radio-label"><input type="radio" name="education" class="form-radio"> 初中</label>
+                                <label class="radio-label"><input type="radio" name="education" class="form-radio"> 高中/中专</label>
+                                <label class="radio-label"><input type="radio" name="education" class="form-radio"> 大专</label>
+                                <label class="radio-label"><input type="radio" name="education" class="form-radio"> 本科</label>
+                                <label class="radio-label"><input type="radio" name="education" class="form-radio"> 硕士及以上</label>
+                            </div>
+                        </div>
+                        <div class="form-group sm:col-span-2">
+                            <label class="form-label" for="occupation">职业</label>
+                            <input class="form-input" type="text" id="occupation" placeholder="请输入职业">
+                        </div>
+                    </div>
+                </form>
+            </div>
+
+            <div id="page-present-illness" class="page-content hidden">
+                <h1 class="text-3xl font-bold text-gray-900 mb-6">二、 病史 - 1. 现病史 (History of Present Illness)</h1>
+                
+                <div class="form-section">
+                    <div class="form-header"><h3>A. ED 病史 (Erectile Dysfunction History)</h3></div>
+                    <div class="form-body">
+                        <div class="form-group">
+                            <label class="form-label">1. 主要症状</label>
+                            <div class="checkbox-group" id="ed-symptoms-group">
+                                <label class="checkbox-label"><input type="checkbox" class="form-checkbox"> 勃起硬度不足</label>
+                                <label class="checkbox-label"><input type="checkbox" class="form-checkbox"> 勃起维持困难</label>
+                                <label class="checkbox-label"><input type="checkbox" class="form-checkbox"> 晨勃消失/减少</label>
+                            </div>
+                            <label class="form-label mt-2" for="ed-symptom-other">其他症状</label>
+                            <input class="form-input" type="text" id="ed-symptom-other" placeholder="请描述其他症状">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label" for="ed-onset-date">2. 发病时间</label>
+                            <input class="form-input" type="month" id="ed-onset-date">
+                        </div>
+                        <div class="form-group-grid">
+                            <div class="form-group">
+                                <label class="form-label">3. 生育史</label>
+                                <div class="radio-group">
+                                    <label class="radio-label"><input type="radio" name="fertility" class="form-radio"> 已生育</label>
+                                    <label class="radio-label"><input type="radio" name="fertility" class="form-radio"> 未生育</label>
+                                </div>
+                                <input class="form-input mt-2" type="number" id="fertility-count" placeholder="子女数量">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">4. 计划生育意愿</label>
+                                <div class="radio-group">
+                                    <label class="radio-label"><input type="radio" name="fertility-plan" class="form-radio"> 有</label>
+                                    <label class="radio-label"><input type="radio" name="fertility-plan" class="form-radio"> 无</label>
+                                    <label class="radio-label"><input type="radio" name="fertility-plan" class="form-radio"> 视情况而定</label>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">5. 伴侣及性生活频次</label>
+                            <div class="radio-group">
+                                <label class="form-label">伴侣情况:</label>
+                                <label class="radio-label"><input type="radio" name="partner" class="form-radio"> 固定</label>
+                                <label class="radio-label"><input type="radio" name="partner" class="form-radio"> 不固定</label>
+                                <label class="radio-label"><input type="radio" name="partner" class="form-radio"> 无</label>
+                            </div>
+                            <input class="form-input mt-2" type="text" id="sex-frequency" placeholder="性生活频次, 例如: 1次/周">
+                        </div>
+                        <div class="form-group-grid">
+                            <div class="form-group">
+                                <label class="form-label" for="iief-5">7. IIEF-5 评分</label>
+                                <input class="form-input" type="number" id="iief-5" placeholder="请输入分数">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label" for="ehs">8. EHS 评分</label>
+                                <input class="form-input" type="number" id="ehs" placeholder="请输入分数">
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">9. 既往治疗史及药物</label>
+                            <div class="radio-group">
+                                <label class="radio-label"><input type="radio" name="ed-treatment" class="form-radio"> 未治疗</label>
+                                <label class="radio-label"><input type="radio" name="ed-treatment" class="form-radio"> 曾治疗</label>
+                            </div>
+                            <textarea class="form-input mt-2" rows="3" placeholder="请详述药物名称、剂量、疗程及效果"></textarea>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="form-section">
+                    <div class="form-header"><h3>B. 糖尿病病史 (Diabetes History)</h3></div>
+                    <div class="form-body">
+                        <div class="form-group">
+                            <label class="form-label">1. 主要症状</label>
+                            <div class="checkbox-group" id="dm-symptoms-group">
+                                <label class="checkbox-label"><input type="checkbox" class="form-checkbox"> 多饮</label>
+                                <label class="checkbox-label"><input type="checkbox" class="form-checkbox"> 多食</label>
+                                <label class="checkbox-label"><input type="checkbox" class="form-checkbox"> 多尿</label>
+                                <label class="checkbox-label"><input type="checkbox" class="form-checkbox"> 体重下降</label>
+                                <label class="checkbox-label"><input type="checkbox" class="form-checkbox"> 无明显症状</label>
+                            </div>
+                            <input class="form-input mt-2" type="text" id="dm-symptom-other" placeholder="请描述其他症状">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label" for="dm-onset-date">2. 发病时间</label>
+                            <input class="form-input" type="month" id="dm-onset-date" placeholder="确诊年份">
+                        </div>
+                         <div class="form-group">
+                            <label class="form-label">3. 降糖药物及胰岛素</label>
+                            <div class="radio-group">
+                                <label class="radio-label"><input type="radio" name="dm-med" class="form-radio"> 无</label>
+                                <label class="radio-label"><input type="radio" name="dm-med" class="form-radio"> 口服药</label>
+                                <label class="radio-label"><input type="radio" name="dm-med" class="form-radio"> 胰岛素</label>
+                            </div>
+                            <textarea class="form-input mt-2" rows="3" placeholder="药物/胰岛素 (名称, 剂量)"></textarea>
+                            <input class="form-input mt-2" type="text" id="dm-med-start" placeholder="启用时间 (例如: 口服药 2018 年 / 胰岛素 2020 年)">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">4. 血糖达标率 (如有)</label>
+                            <div class="radio-group">
+                                <label class="radio-label"><input type="radio" name="glucose-control" class="form-radio"> 良好</label>
+                                <label class="radio-label"><input type="radio" name="glucose-control" class="form-radio"> 一般</label>
+                                <label class="radio-label"><input type="radio" name="glucose-control" class="form-radio"> 差</label>
+                                <input class="form-input" type="text" placeholder="或输入具体达标率 %" style="width: auto;">
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">5. 急性并发症</label>
+                            <div class="form-group-grid">
+                                <div>
+                                    <label class="form-label" for="dka-count">酮症酸中毒 (次数)</label>
+                                    <input class="form-input" type="number" id="dka-count" placeholder="0">
+                                </div>
+                                <div>
+                                    <label class="form-label" for="hypo-freq">低血糖 (频次/月)</label>
+                                    <input class="form-input" type="text" id="hypo-freq" placeholder="例如: 偶发, 或 2次/月">
+                                </div>
+                                <div>
+                                    <label class="form-label" for="severe-hypo-count">严重低血糖 (次数)</label>
+                                    <input class="form-input" type="number" id="severe-hypo-count" placeholder="0">
+                                </div>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">6. 慢性并发症 (可多选)</label>
+                            <div class="checkbox-group" style="flex-direction: column; gap: 0.75rem;">
+                                <label class="checkbox-label"><input type="checkbox" class="form-checkbox"> 糖尿病肾病 (分期: <input type="text" class="form-input inline-input" style="width: 80px; padding: 2px 6px; margin-left: 5px;"></label>
+                                <label class="checkbox-label"><input type="checkbox" class="form-checkbox"> 周围神经病变 (症状: <input type="text" class="form-input inline-input" style="width: 150px; padding: 2px 6px; margin-left: 5px;"></label>
+                                <label class="checkbox-label"><input type="checkbox" class="form-checkbox"> 视网膜病变 (分期: <input type="text" class="form-input inline-input" style="width: 80px; padding: 2px 6px; margin-left: 5px;"></label>
+                                <label class="checkbox-label"><input type="checkbox" class="form-checkbox"> 糖尿病足 (分级: <input type="text" class="form-input inline-input" style="width: 80px; padding: 2px 6px; margin-left: 5px;"></label>
+                                <label class="checkbox-label"><input type="checkbox" class="form-checkbox"> 糖尿病大血管并发症
+                                    <span class="ml-4 checkbox-group">
+                                        <label class="checkbox-label"><input type="checkbox" class="form-checkbox"> 冠心病</label>
+                                        <label class="checkbox-label"><input type="checkbox" class="form-checkbox"> 脑血管病</label>
+                                        <label class="checkbox-label"><input type="checkbox" class="form-checkbox"> 外周血管病</label>
+                                    </span>
+                                </label>
+                                <textarea class="form-input mt-2" rows="2" placeholder="其他并发症..."></textarea>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="page-comorbidities" class="page-content hidden">
+                <h1 class="text-3xl font-bold text-gray-900 mb-6">二、 病史 - 2. 合并症 (Comorbidities)</h1>
+                <p class="text-gray-600 mb-6">请勾选所有符合项，并注明详情 (如: 确诊时间, 目前用药)。</p>
+                <div class="form-section">
+                    <div class="form-body" style="padding: 0;">
+                        <table class="w-full text-left">
+                            <thead class="bg-gray-50">
+                                <tr>
+                                    <th class="p-4 font-semibold text-gray-700">合并症</th>
+                                    <th class="p-4 font-semibold text-gray-700">是否患有</th>
+                                    <th class="p-4 font-semibold text-gray-700">详情 (确诊时间, 目前用药)</th>
+                                </tr>
+                            </thead>
+                            <tbody class="divide-y divide-gray-200">
+                                
+                                <tr class="hover:bg-gray-50">
+                                    <td class="p-4 font-medium">1. 高血压病</td>
+                                    <td class="p-4"><div class="radio-group"><label class="radio-label"><input type="radio" name="como-1" class="form-radio"> 是</label><label class="radio-label"><input type="radio" name="como-1" class="form-radio"> 否</label></div></td>
+                                    <td class="p-4"><input class="form-input" type="text"></td>
+                                </tr>
+                                <tr class="hover:bg-gray-50">
+                                    <td class="p-4 font-medium">2. 高脂血症</td>
+                                    <td class="p-4"><div class="radio-group"><label class="radio-label"><input type="radio" name="como-2" class="form-radio"> 是</label><label class="radio-label"><input type="radio" name="como-2" class="form-radio"> 否</label></div></td>
+                                    <td class="p-4"><input class="form-input" type="text"></td>
+                                </tr>
+                                <tr class="hover:bg-gray-50">
+                                    <td class="p-4 font-medium">3. 脂肪肝</td>
+                                    <td class="p-4"><div class="radio-group"><label class="radio-label"><input type="radio" name="como-3" class="form-radio"> 是</label><label class="radio-label"><input type="radio" name="como-3" class="form-radio"> 否</label></div></td>
+                                    <td class="p-4"><div class="radio-group"><label class="radio-label"><input type="radio" name="como-3-detail" class="form-radio"> 轻度</label><label class="radio-label"><input type="radio" name="como-3-detail" class="form-radio"> 中度</label><label class="radio-label"><input type="radio" name="como-3-detail" class="form-radio"> 重度</label></div></td>
+                                </tr>
+                                <tr class="hover:bg-gray-50">
+                                    <td class="p-4 font-medium">4. 高尿酸血症</td>
+                                    <td class="p-4"><div class="radio-group"><label class="radio-label"><input type="radio" name="como-4" class="form-radio"> 是</label><label class="radio-label"><input type="radio" name="como-4" class="form-radio"> 否</label></div></td>
+                                    <td class="p-4"><input class="form-input" type="text"></td>
+                                </tr>
+                                <tr class="hover:bg-gray-50">
+                                    <td class="p-4 font-medium">5. 睡眠呼吸暂停综合征</td>
+                                    <td class="p-4"><div class="radio-group"><label class="radio-label"><input type="radio" name="como-5" class="form-radio"> 是</label><label class="radio-label"><input type="radio" name="como-5" class="form-radio"> 否</label></div></td>
+                                    <td class="p-4"><input class="form-input" type="text"></td>
+                                </tr>
+                                <tr class="hover:bg-gray-50">
+                                    <td class="p-4 font-medium">6. 同型半胱氨酸血症</td>
+                                    <td class="p-4"><div class="radio-group"><label class="radio-label"><input type="radio" name="como-6" class="form-radio"> 是</label><label class="radio-label"><input type="radio" name="como-6" class="form-radio"> 否</label></div></td>
+                                    <td class="p-4"><input class="form-input" type="text"></td>
+                                </tr>
+                                <tr class="hover:bg-gray-50">
+                                    <td class="p-4 font-medium">7. 肥胖症</td>
+                                    <td class="p-4"><div class="radio-group"><label class="radio-label"><input type="radio" name="como-7" class="form-radio"> 是</label><label class="radio-label"><input type="radio" name="como-7" class="form-radio"> 否</label></div></td>
+                                    <td class="p-4"><input class="form-input" type="text" placeholder="BMI: _____"></td>
+                                </tr>
+                                <tr class="hover:bg-gray-50">
+                                    <td class="p-4 font-medium">8. 冠心病</td>
+                                    <td class="p-4"><div class="radio-group"><label class="radio-label"><input type="radio" name="como-8" class="form-radio"> 是</label><label class="radio-label"><input type="radio" name="como-8" class="form-radio"> 否</label></div></td>
+                                    <td class="p-4"><input class="form-input" type="text"></td>
+                                </tr>
+                                <tr class="hover:bg-gray-50">
+                                    <td class="p-4 font-medium">9. 卒中</td>
+                                    <td class="p-4"><div class="radio-group"><label class="radio-label"><input type="radio" name="como-9" class="form-radio"> 是</label><label class="radio-label"><input type="radio" name="como-9" class="form-radio"> 否</label></div></td>
+                                    <td class="p-4"><input class="form-input" type="text"></td>
+                                </tr>
+                                <tr class="hover:bg-gray-50">
+                                    <td class="p-4 font-medium">10. 前列腺增生症</td>
+                                    <td class="p-4"><div class="radio-group"><label class="radio-label"><input type="radio" name="como-10" class="form-radio"> 是</label><label class="radio-label"><input type="radio" name="como-10" class="form-radio"> 否</label></div></td>
+                                    <td class="p-4"><input class="form-input" type="text"></td>
+                                </tr>
+                                <tr class="hover:bg-gray-50">
+                                    <td class="p-4 font-medium">11. 前列腺炎</td>
+                                    <td class="p-4"><div class="radio-group"><label class="radio-label"><input type="radio" name="como-11" class="form-radio"> 是</label><label class="radio-label"><input type="radio" name="como-11" class="form-radio"> 否</label></div></td>
+                                    <td class="p-4"><input class="form-input" type="text"></td>
+                                </tr>
+                                <tr class="hover:bg-gray-50">
+                                    <td class="p-4 font-medium">12. 甲状腺疾病</td>
+                                    <td class="p-4"><div class="radio-group"><label class="radio-label"><input type="radio" name="como-12" class="form-radio"> 是</label><label class="radio-label"><input type="radio" name="como-12" class="form-radio"> 否</label></div></td>
+                                    <td class="p-4"><div class="radio-group"><label class="radio-label"><input type="radio" name="como-12-detail" class="form-radio"> 甲亢</label><label class="radio-label"><input type="radio" name="como-12-detail" class="form-radio"> 甲减</label></div></td>
+                                </tr>
+
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            
+            <div id="page-other-history" class="page-content hidden">
+                <h1 class="text-3xl font-bold text-gray-900 mb-6">二、 病史 - 3. 其他既往病史 (Other Past Medical History)</h1>
+                <form class="form-section">
+                    <div class="form-body">
+                        <div class="form-group">
+                            <label class="form-label">1. 其他系统疾病史及治疗史</label>
+                            <div class="radio-group">
+                                <label class="radio-label"><input type="radio" name="other-disease" class="form-radio"> 无</label>
+                                <label class="radio-label"><input type="radio" name="other-disease" class="form-radio"> 有</label>
+                            </div>
+                            <textarea class="form-input mt-2" rows="3" placeholder="请详述疾病名称、治疗情况"></textarea>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">2. 手术史</label>
+                            <div class="radio-group">
+                                <label class="radio-label"><input type="radio" name="surgery" class="form-radio"> 无</label>
+                                <label class="radio-label"><input type="radio" name="surgery" class="form-radio"> 有</label>
+                            </div>
+                            <textarea class="form-input mt-2" rows="3" placeholder="请详述手术名称、时间"></textarea>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">3. 过敏史</label>
+                            <div class="radio-group">
+                                <label class="radio-label"><input type="radio" name="allergy" class="form-radio"> 无</label>
+                                <label class="radio-label"><input type="radio" name="allergy" class="form-radio"> 有</label>
+                            </div>
+                            <div class="checkbox-group mt-2">
+                                <label class="checkbox-label"><input type="checkbox" class="form-checkbox"> 药物: <input type="text" class="form-input inline-input" style="width: 150px; padding: 2px 6px; margin-left: 5px;"></label>
+                                <label class="checkbox-label"><input type="checkbox" class="form-checkbox"> 食物: <input type="text" class="form-input inline-input" style="width: 150px; padding: 2px 6px; margin-left: 5px;"></label>
+                                <label class="checkbox-label"><input type="checkbox" class="form-checkbox"> 其他: <input type="text" class="form-input inline-input" style="width: 150px; padding: 2px 6px; margin-left: 5px;"></label>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">4. 吸烟史</label>
+                            <div class="radio-group">
+                                <label class="radio-label"><input type="radio" name="smoking" class="form-radio"> 无</label>
+                                <label class="radio-label"><input type="radio" name="smoking" class="form-radio"> 已戒烟 (年: <input type="number" class="form-input inline-input" style="width: 80px; padding: 2px 6px; margin-left: 5px;"></label>
+                                <label class="radio-label"><input type="radio" name="smoking" class="form-radio"> 吸烟</label>
+                            </div>
+                            <div class="form-group-grid mt-2">
+                                <input class="form-input" type="number" placeholder="支/天">
+                                <input class="form-input" type="number" placeholder="累计年">
+                                <input class="form-input" type="number" placeholder="吸烟指数">
+                            </div>
+                        </div>
+                         <div class="form-group">
+                            <label class="form-label">5. 饮酒史</label>
+                            <div class="radio-group">
+                                <label class="radio-label"><input type="radio" name="drinking" class="form-radio"> 无</label>
+                                <label class="radio-label"><input type="radio" name="drinking" class="form-radio"> 已戒酒 (年: <input type="number" class="form-input inline-input" style="width: 80px; padding: 2px 6px; margin-left: 5px;"></label>
+                                <label class="radio-label"><input type="radio" name="drinking" class="form-radio"> 饮酒</label>
+                            </div>
+                            <div class="form-group-grid mt-2">
+                                <input class="form-input" type="text" placeholder="频次 (次/周)">
+                                <input class="form-input" type="text" placeholder="种类">
+                                <input class="form-input" type="number" placeholder="平均 (g/次)">
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">6. 重大外伤史</label>
+                            <div class="radio-group">
+                                <label class="radio-label"><input type="radio" name="trauma" class="form-radio"> 无</label>
+                                <label class="radio-label"><input type="radio" name="trauma" class="form-radio"> 有</label>
+                            </div>
+                            <textarea class="form-input mt-2" rows="3" placeholder="请详述外伤时间、部位、性质"></textarea>
+                        </div>
+                    </div>
+                </form>
+            </div>
+
+        </main>
+
+        <div class="fixed bottom-6 right-6 md:bottom-10 md:right-10 z-50 flex gap-4">
+            <button id="clearFormButton" class="px-5 py-2.5 bg-gray-500 text-white font-medium rounded-lg shadow-md hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-gray-400 focus:ring-opacity-50 transition duration-200">
+                清空表单
+            </button>
+            <button id="savePatientButton" class="px-5 py-2.5 bg-blue-600 text-white font-medium rounded-lg shadow-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50 transition duration-200">
+                保存患者
+            </button>
+        </div>
+
+        <div id="statusMessage" class="status-message"></div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', async function() {
+            
+            let supabaseInitialized = false;
+            let db;
+            
+            const supabaseUrl = 'https://ljutscjzjddwxcmpjptt.supabase.co'; // <--- 在这里替换为您的 Supabase Project URL
+            const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxqdXRzY2p6amRkd3hjbXBqcHR0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjEyOTAxNDcsImV4cCI6MjA3Njg2NjE0N30.NlpYY00z4OKbDLAln1UYLRPN_hZrE2HY_qpQAv4RfzU'; // <--- 在这里替换为您的 Supabase anon public Key
+
+            const statusMessage = document.getElementById('statusMessage');
+            
+            function showStatusMessage(message, isError = false) {
+                statusMessage.textContent = message;
+                statusMessage.className = 'status-message';
+                if (isError) {
+                    statusMessage.classList.add('bg-error', 'show');
+                } else {
+                    statusMessage.classList.add('bg-success', 'show');
+                }
+                
+                setTimeout(() => {
+                    statusMessage.classList.remove('show');
+                }, 3000);
+            }
+
+            try {
+                if (typeof supabase !== 'undefined' && typeof supabase.createClient === 'function') {
+                    if (!supabaseUrl.startsWith('YOUR_') && !supabaseKey.startsWith('YOUR_')) {
+                        
+                        db = supabase.createClient(supabaseUrl, supabaseKey);
+                        supabaseInitialized = true;
+                        console.log("Supabase initialized.");
+                        
+                    } else {
+                        console.warn("请替换 'YOUR_SUPABASE_URL' 和 'YOUR_SUPABASE_ANON_KEY'");
+                        showStatusMessage("数据库未配置，功能受限", true);
+                    }
+                } else {
+                    console.warn("Supabase SDK not loaded. Database features will be disabled.");
+                    showStatusMessage("Supabase SDK 加载失败，功能受限", true);
+                }
+            } catch (e) {
+                console.error("Supabase init failed:", e);
+                showStatusMessage("无法连接到Supabase", true);
+            }
+
+            const navLinks = document.querySelectorAll('.nav-link');
+            const pageContents = document.querySelectorAll('.page-content');
+
+            navLinks.forEach(link => {
+                link.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    
+                    const pageId = this.getAttribute('data-page');
+                    if (!pageId) return;
+
+                    pageContents.forEach(page => {
+                        if (page.id === pageId) {
+                            page.classList.remove('hidden');
+                        } else {
+                            page.classList.add('hidden');
+                        }
+                    });
+
+                    navLinks.forEach(nav => nav.classList.remove('active'));
+                    
+                    this.classList.add('active');
+                    
+                    if (this.classList.contains('nav-link-sub')) {
+                        const parentSpan = this.closest('ul').previousElementSibling;
+                        if(parentSpan && parentSpan.classList.contains('nav-link')) {
+                           
+                        }
+                    }
+                });
+            });
+
+            const ctx = document.getElementById('mockChartCanvas').getContext('2d');
+            const mockChart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: ['< 20 岁', '21-30 岁', '31-40 岁', '41-50 岁', '51-60 岁', '61-70 岁', '> 70 岁'],
+                    datasets: [{
+                        label: '患者数量',
+                        data: [5, 12, 19, 25, 30, 18, 7],
+                        backgroundColor: 'rgba(37, 99, 235, 0.6)',
+                        borderColor: 'rgba(37, 99, 235, 1)',
+                        borderWidth: 1,
+                        borderRadius: 5
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: '患者数量'
+                            }
+                        },
+                        x: {
+                            title: {
+                                display: true,
+                                text: '年龄分段'
+                            }
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            display: false
+                        },
+                        tooltip: {
+                            backgroundColor: '#111827',
+                            titleColor: '#ffffff',
+                            bodyColor: '#ffffff',
+                            borderRadius: 6,
+                            padding: 10,
+                            callbacks: {
+                                label: function(context) {
+                                    return ` ${context.dataset.label}: ${context.formattedValue} 人`;
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+
+            function getFormValue(id) {
+                const el = document.getElementById(id);
+                return el ? el.value : '';
+            }
+
+            function getRadioValue(name) {
+                const el = document.querySelector(`input[name="${name}"]:checked`);
+                if (el) {
+                    return el.closest('.radio-label').textContent.trim();
+                }
+                return '';
+            }
+
+            function getCheckboxValues(containerId, checkboxClass) {
+                const container = document.getElementById(containerId);
+                if (!container) return [];
+                const checked = [];
+                container.querySelectorAll(`.${checkboxClass}:checked`).forEach(cb => {
+                    checked.push(cb.closest('.checkbox-label').textContent.trim());
+                });
+                return checked;
+            }
+            
+            function collectPatientData() {
+                const data = {
+                    patientId: getFormValue('patient-id'),
+                    age: getFormValue('age'),
+                    ethnicity: getFormValue('ethnicity'),
+                    region: getRadioValue('region'),
+                    address: getFormValue('address'),
+                    maritalStatus: getRadioValue('marital'),
+                    education: getRadioValue('education'),
+                    occupation: getFormValue('occupation'),
+
+                    edSymptoms: getCheckboxValues('ed-symptoms-group', 'form-checkbox'),
+                    edSymptomOther: getFormValue('ed-symptom-other'),
+                    edOnsetDate: getFormValue('ed-onset-date'),
+                    fertility: getRadioValue('fertility'),
+                    fertilityCount: getFormValue('fertility-count'),
+                    fertilityPlan: getRadioValue('fertility-plan'),
+                    partnerStatus: getRadioValue('partner'),
+                    sexFrequency: getFormValue('sex-frequency'),
+                    iief5: getFormValue('iief-5'),
+                    ehs: getFormValue('ehs'),
+                    edTreatment: getRadioValue('ed-treatment'),
+                    edTreatmentDetail: document.querySelector('textarea[placeholder*="请详述药物名称"]').value,
+
+                    dmSymptoms: getCheckboxValues('dm-symptoms-group', 'form-checkbox'), 
+                    dmSymptomOther: getFormValue('dm-symptom-other'),
+                    dmOnsetDate: getFormValue('dm-onset-date'),
+                    dmMed: getRadioValue('dm-med'),
+                    dmMedDetail: document.querySelector('textarea[placeholder*="药物/胰岛素"]').value,
+                    dmMedStart: getFormValue('dm-med-start'),
+                    dmGlucoseControl: getRadioValue('glucose-control'),
+                    dmGlucoseControlDetail: document.querySelector('input[placeholder*="或输入具体达标率"]').value,
+                    dkaCount: getFormValue('dka-count'),
+                    hypoFreq: getFormValue('hypo-freq'),
+                    severeHypoCount: getFormValue('severe-hypo-count'),
+                    
+                    comorbidities: {}, 
+                    otherHistory: {} 
+                };
+                
+                document.querySelectorAll('#page-comorbidities tbody tr').forEach(tr => {
+                    const name = tr.cells[0].textContent.trim();
+                    const value = tr.querySelector('input[type="radio"]:checked') ? tr.querySelector('input[type="radio"]:checked').closest('.radio-label').textContent.trim() : '未选择';
+                    const detail = tr.cells[2].querySelector('input[type="text"]')?.value || tr.cells[2].querySelector('input[type="radio"]:checked')?.closest('.radio-label').textContent.trim() || '';
+                    if (value === '是') {
+                        data.comorbidities[name] = `是 (详情: ${detail})`;
+                    } else if (value === '否') {
+                         data.comorbidities[name] = '否';
+                    }
+                });
+
+                data.otherHistory.otherDisease = document.querySelector('textarea[placeholder*="请详述疾病名称"]').value;
+                data.otherHistory.surgery = document.querySelector('textarea[placeholder*="请详述手术名称"]').value;
+                data.otherHistory.smoking = getRadioValue('smoking');
+                data.otherHistory.drinking = getRadioValue('drinking');
+                data.otherHistory.trauma = document.querySelector('textarea[placeholder*="请详述外伤时间"]').value;
+
+                return data;
+            }
+
+            function clearForm() {
+                document.querySelectorAll('.form-input, .form-checkbox, .form-radio').forEach(input => {
+                    if (input.type === 'checkbox' || input.type === 'radio') {
+                        input.checked = false;
+                    } else if (input.type !== 'button' && input.type !== 'submit') {
+                        input.value = '';
+                    }
+                });
+                document.querySelectorAll('textarea').forEach(ta => ta.value = '');
+                showStatusMessage("表单已清空", false);
+            }
+            
+            const clearFormButton = document.getElementById('clearFormButton');
+            clearFormButton.addEventListener('click', clearForm);
+
+            const savePatientButton = document.getElementById('savePatientButton');
+            savePatientButton.addEventListener('click', async () => {
+                if (!supabaseInitialized) {
+                    showStatusMessage("数据库未连接，无法保存", true);
+                    return;
+                }
+
+                const patientData = collectPatientData();
+                
+                if (!patientData.patientId) {
+                    showStatusMessage("“患者ID/编号”为必填项", true);
+                    document.getElementById('patient-id').focus();
+                    return;
+                }
+
+                savePatientButton.textContent = "保存中...";
+                savePatientButton.disabled = true;
+
+                try {
+                    // *** 已修复 ***
+                    // 将 patientData 对象包装在 { data: ... } 中
+                    // 以便将其插入到名为 'data' 的 jsonb 列中
+                    const { data, error } = await db
+                        .from('patients') // 确保表名为 'patients'
+                        .insert([{ data: patientData }]) // 修正: 将对象插入到 'data' 列
+                        .select();
+
+                    if (error) {
+                        throw error;
+                    }
+                    
+                    console.log("Document written: ", data);
+                    showStatusMessage("患者信息保存成功!", false);
+                    clearForm();
+                } catch (e) {
+                    console.error("Error adding document: ", e);
+                    showStatusMessage("保存失败: " + e.message, true);
+                } finally {
+                    savePatientButton.textContent = "保存患者";
+                    savePatientButton.disabled = false;
+                }
+            });
+
+            const exportButton = document.getElementById('exportButton');
+            const exportStatus = document.getElementById('exportStatus');
+
+            const headerMap = {
+                'patientId': '患者ID/编号',
+                'age': '年龄',
+                'ethnicity': '民族',
+                'region': '地区',
+                'address': '常住地址',
+                'maritalStatus': '婚姻/伴侣状况',
+                'education': '教育水平',
+                'occupation': '职业',
+                'edSymptoms': 'ED主要症状',
+                'edSymptomOther': 'ED其他症状',
+                'edOnsetDate': 'ED发病时间',
+                'fertility': '生育史',
+                'fertilityCount': '子女数量',
+                'fertilityPlan': '计划生育意愿',
+                'partnerStatus': '伴侣情况',
+                'sexFrequency': '性生活频次',
+                'iief5': 'IIEF-5评分',
+                'ehs': 'EHS评分',
+                'edTreatment': 'ED既往治疗',
+                'edTreatmentDetail': 'ED治疗详情',
+                'dmSymptoms': '糖尿病主要症状',
+                'dmSymptomOther': '糖尿病其他症状',
+                'dmOnsetDate': '糖尿病发病时间',
+                'dmMed': '降糖药物',
+                'dmMedDetail': '降糖药物详情',
+                'dmMedStart': '药物启用时间',
+                'dmGlucoseControl': '血糖达标率',
+                'dmGlucoseControlDetail': '血糖达标率(%)',
+                'dkaCount': '酮症酸中毒次数',
+                'hypoFreq': '低血糖频次',
+                'severeHypoCount': '严重低血糖次数',
+                'otherHistory.otherDisease': '其他系统疾病史',
+                'otherHistory.surgery': '手术史',
+                'otherHistory.smoking': '吸烟史',
+                'otherHistory.drinking': '饮酒史',
+                'otherHistory.trauma': '重大外伤史',
+            };
+
+            exportButton.addEventListener('click', async () => {
+                if (!supabaseInitialized) {
+                    showStatusMessage("数据库未连接，无法导出", true);
+                    return;
+                }
+
+                exportStatus.textContent = "正在准备数据...";
+                exportButton.disabled = true;
+
+                try {
+                    // *** 已修复 ***
+                    // 只选择 'data' 列
+                    const { data: patientRows, error } = await db
+                        .from('patients')
+                        .select('data') // 修正: 只选择 'data' 列
+                        .limit(1000); 
+
+                    if (error) {
+                        throw error;
+                    }
+                    
+                    if (patientRows.length === 0) {
+                        showStatusMessage("没有找到可导出的数据", false);
+                        exportStatus.textContent = "";
+                        return;
+                    }
+                    
+                    const dataToExport = [];
+                    let allHeaders = new Set(); 
+
+                    // *** 已修复 ***
+                    // 从 row.data 中提取数据
+                    patientRows.forEach(row => {
+                        const data = row.data; // 从 'data' 列中提取对象
+                        if (!data) return; // 跳过空的 'data' 列
+                        
+                        dataToExport.push(data);
+                        Object.keys(data).forEach(key => {
+                            if (key === 'comorbidities' && typeof data[key] === 'object' && data[key] !== null) {
+                                Object.keys(data[key]).forEach(subKey => allHeaders.add(`comorbidities.${subKey}`));
+                            } else if (key === 'otherHistory' && typeof data[key] === 'object' && data[key] !== null) {
+                                Object.keys(data[key]).forEach(subKey => allHeaders.add(`otherHistory.${subKey}`));
+                            } else {
+                                // 现在 'id' 和 'created_at' 不会出现在这里
+                                allHeaders.add(key);
+
+                            }
+                        });
+                    });
+
+                    if (dataToExport.length === 0) {
+                        showStatusMessage("数据为空。", false);
+                        exportStatus.textContent = "";
+                        return;
+                    }
+
+                    const sortedHeaders = Array.from(allHeaders).sort();
+                    
+                    let csvContent = "\uFEFF";
+                    
+                    const chineseHeaders = sortedHeaders.map(header => {
+                        if (headerMap[header]) {
+                            return headerMap[header];
+                        }
+                        if (header.startsWith('comorbidities.')) {
+                            return header.substring('comorbidities.'.length);
+                        }
+                        return header; 
+                    });
+                    csvContent += chineseHeaders.join(",") + "\r\n";
+
+                    dataToExport.forEach(data => {
+                        let row = [];
+                        sortedHeaders.forEach(header => {
+                            let value;
+                            if (header.includes('.')) {
+                                const [key, subKey] = header.split('.', 2);
+                                value = data[key] ? data[key][subKey] : '';
+                            } else {
+                                value = data[header];
+                            }
+                            
+                            if (value === null || value === undefined) {
+                                value = '';
+                            } else if (Array.isArray(value)) {
+                                value = value.join('; ');
+                            } else if (typeof value === 'object') {
+                                // 避免导出 [object Object]
+                                value = JSON.stringify(value); 
+                            }
+                            
+                            let strValue = String(value).replace(/"/g, '""');
+                            if (strValue.includes(',')) {
+                                strValue = `"${strValue}"`;
+                            }
+                            row.push(strValue);
+                        });
+                        csvContent += row.join(",") + "\r\n";
+                    });
+
+                    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+                    const link = document.createElement("a");
+                    const url = URL.createObjectURL(blob);
+                    link.setAttribute("href", url);
+                    link.setAttribute("download", "patient_data_export.csv");
+                    link.style.visibility = 'hidden';
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+
+                    exportStatus.textContent = `成功导出 ${dataToExport.length} 条记录。`;
+
+                } catch (e) {
+                    console.error("Error exporting data: ", e);
+                    showStatusMessage("导出失败: " + e.message, true);
+                    exportStatus.textContent = "导出失败。";
+                } finally {
+                    exportButton.disabled = false;
+                    setTimeout(() => { exportStatus.textContent = ""; }, 4000);
+                }
+            });
+            
+            // 将 script 标签从 module 改为普通 script
+        });
+    </script>
+</body>
+</html>
+
